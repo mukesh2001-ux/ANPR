@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ANPR System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                <small class="text-muted">Welcome, {{ current_user.username }}!</small>
+            </h1>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4>{{ stats.total_detections }}</h4>
+                            <p class="mb-0">Total Detections</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-camera fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4>{{ stats.successful_ocr }}</h4>
+                            <p class="mb-0">Successful OCR</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check-circle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4>{{ user_detections }}</h4>
+                            <p class="mb-0">Your Detections</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-user fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h4>{{ accuracy }}%</h4>
+                            <p class="mb-0">OCR Accuracy</p>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-percentage fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <h3>Quick Actions</h3>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-video fa-3x text-primary mb-3"></i>
+                    <h5>Start Live Detection</h5>
+                    <p class="text-muted">Begin real-time number plate detection using your camera</p>
+                    <a href="{{ url_for('live_detection') }}" class="btn btn-primary">
+                        <i class="fas fa-play me-1"></i>Start Detection
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-search fa-3x text-success mb-3"></i>
+                    <h5>Search Plates</h5>
+                    <p class="text-muted">Search through detected plates by number or date range</p>
+                    <a href="{{ url_for('search_plates') }}" class="btn btn-success">
+                        <i class="fas fa-search me-1"></i>Search Now
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-history fa-3x text-info mb-3"></i>
+                    <h5>View History</h5>
+                    <p class="text-muted">Browse through all previously detected number plates</p>
+                    <a href="{{ url_for('plate_history') }}" class="btn btn-info">
+                        <i class="fas fa-list me-1"></i>View History
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Detections -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-clock me-2"></i>Recent Detections</h5>
+                </div>
+                <div class="card-body">
+                    {% if recent_plates %}
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Image</th>
+                                        <th>Plate Number</th>
+                                        <th>Confidence</th>
+                                        <th>Detected At</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for plate in recent_plates %}
+                                    <tr>
+                                        <td>
+                                            <img src="{{ url_for('static', filename=plate.image_path.replace('static/', '')) }}" 
+                                                 alt="Plate" class="img-thumbnail" style="max-width: 100px;">
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-primary">{{ plate.plate_number or 'N/A' }}</span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if plate.confidence > 70 else 'warning' if plate.confidence > 40 else 'danger' }}">
+                                                {{ "%.1f"|format(plate.confidence) }}%
+                                            </span>
+                                        </td>
+                                        <td>{{ plate.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted">
+                            <i class="fas fa-camera fa-3x mb-3"></i>
+                            <p>No detections yet. Start live detection to begin!</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

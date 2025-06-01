@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+
+{% block title %}Live Detection - ANPR System{% endblock %}
+
+{% block extra_css %}
+<style>
+    #videoContainer {
+        position: relative;
+        max-width: 100%;
+        margin: 0 auto;
+    }
+    
+    #videoFeed {
+        width: 100%;
+        height: auto;
+        border: 2px solid #007bff;
+        border-radius: 8px;
+    }
+    
+    .detection-overlay {
+        position: absolute;
+        border: 2px solid #00ff00;
+        background: rgba(0, 255, 0, 0.1);
+        pointer-events: none;
+    }
+    
+    .detection-label {
+        position: absolute;
+        background: rgba(0, 255, 0, 0.8);
+        color: white;
+        padding: 2px 6px;
+        font-size: 12px;
+        border-radius: 3px;
+        pointer-events: none;
+    }
+    
+    .control-panel {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    
+    .status-active {
+        background-color: #28a745;
+        animation: pulse 2s infinite;
+    }
+    
+    .status-inactive {
+        background-color: #dc3545;
+    }
+    
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    
+    .detection-log {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <i class="fas fa-video me-2"></i>Live Number Plate Detection
+            </h1>
+        </div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="control-panel">
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <h5>
+                    <span id="statusIndicator" class="status-indicator status-inactive"></span>
+                    Detection Status: <span id="statusText">Stopped</span>
+                </h5>
+                <p class="mb-0 text-muted">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Click "Start Detection" to begin real-time plate recognition
+                </p>
+            </div>
+            <div class="col-md-6 text-md-end">
+                <button id="startBtn" class="btn btn-success me-2">
+                    <i class="fas fa-play me-1"></i>Start Detection
+                </button>
+                <button id="stopBtn" class="btn btn-danger me-2" disabled>
+                    <i class="fas fa-stop me-1"></i>Stop Detection
+                </button>
+                <button id="captureBtn" class="btn btn-primary" disabled>
+                    <i class="fas fa-camera me-1"></i>Capture
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Video Feed -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-camera me-2"></i>Camera Feed</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div id="videoContainer">
+                        <img id="videoFeed" src="" alt="Video Feed" style="display: none;">
+                        <div id="noVideo" class="text-center p-5">
+                            <i class="fas fa-video-slash fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">Camera feed will appear here when detection starts</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Results -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-list me-2"></i>Live Detections</h5>
+                </div>
+                <div class="card-body">
+                    <div id="detectionCount" class="mb-3">
+                        <strong>Total Detections: <span id="countValue">0</span></strong>
+                    </div>
+                    <div id="detectionLog" class="detection-log">
+                        <div class="text-center text-muted">
+                            <i class="fas fa-search fa-2x mb-2"></i>
+                            <p>Detections will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Captures -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5><i class="fas fa-images me-2"></i>Recent Captures</h5>
+                </div>
+                <div class="card-body">
+                    <div id="recentCaptures">
+                        <div class="text-center text-muted">
+                            <i class="fas fa-camera fa-2x mb-2"></i>
+                            <p>Captured plates will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+class LiveDetection {
+    constructor() {
+        this.socket = io();
+        this.isDetecting = false;
+        this.detectionCount = 0;
+
+        this.initializeElements();
+        this.setupEventListeners();
+        this.setupSocketEvents();
+        this.loadRecentDetections();
+
+        // Refresh recent detections every 30 seconds
+        setInterval(() => {
+            this.loadRecentDetections();
+        }, 30000);
+    }
+    
+    initializeElements() {
+        this.startBtn = document.getElementById('startBtn');
+        this.stopBtn = document.getElementById('stopBtn');
+        this.captureBtn = document.getElementById('captureBtn');
+        this.videoFeed = document.getElementById('videoFeed');
+        this.noVideo = document.getElementById('noVideo');
+        this.statusIndicator = document.getElementById('statusIndicator');
+        this.statusText = document.getElementById('statusText');
+        this.detectionLog = document.getElementById('detectionLog');
+        this.countValue = document.getElementById('countValue');
+        this.recentCaptures = document.getElementById('recentCaptures');
+    }
+    
+    setupEventListeners() {
+        this.startBtn.addEventListener('click', () => this.startDetection());
+        this.stopBtn.addEventListener('click', () => this.stopDetection());
+        this.captureBtn.addEventListener('click', () => this.captureFrame());
+    }
+    
+    setupSocketEvents() {
+        this.socket.on('video_frame', (data) => {
+            this.updateVideoFeed(data.frame);
+        });
+        
+        this.socket.on('detection_result', (data) => {
+            this.handleDetectionResult(data);
+        });
+        
+        this.socket.on('detection_error', (data) => {
+            this.showError(data.error);
+        });
+        
+        this.socket.on('capture_saved', (data) => {
+            this.handleCaptureSaved(data);
+        });
+    }
+    
+    startDetection() {
+        this.socket.emit('start_detection');
+        this.isDetecting = true;
+        this.updateUI();
+    }
+    
+    stopDetection() {
+        this.socket.emit('stop_detection');
+        this.isDetecting = false;
+        this.updateUI();
+        this.hideVideoFeed();
+    }
+    
+    captureFrame() {
+        this.socket.emit('capture_frame');
+    }
+    
+    updateUI() {
+        this.startBtn.disabled = this.isDetecting;
+        this.stopBtn.disabled = !this.isDetecting;
+        this.captureBtn.disabled = !this.isDetecting;
+        
+        if (this.isDetecting) {
+            this.statusIndicator.className = 'status-indicator status-active';
+            this.statusText.textContent = 'Active';
+        } else {
+            this.statusIndicator.className = 'status-indicator status-inactive';
+            this.statusText.textContent = 'Stopped';
+        }
+    }
+    
+    updateVideoFeed(frameData) {
+        this.videoFeed.src = 'data:image/jpeg;base64,' + frameData;
+        this.videoFeed.style.display = 'block';
+        this.noVideo.style.display = 'none';
+    }
+    
+    hideVideoFeed() {
+        this.videoFeed.style.display = 'none';
+        this.noVideo.style.display = 'block';
+    }
+    
+    handleDetectionResult(data) {
+        this.detectionCount++;
+        this.countValue.textContent = this.detectionCount;
+
+        if (data.detections && data.detections.length > 0) {
+            data.detections.forEach(detection => {
+                this.addDetectionToLog(detection);
+            });
+
+            // Show auto-save notification if any detections were auto-saved
+            if (data.auto_saved_count && data.auto_saved_count > 0) {
+                this.showAutoSaveNotification(data.auto_saved_count);
+                // Refresh recent detections when new ones are saved
+                setTimeout(() => {
+                    this.loadRecentDetections();
+                }, 1000);
+            }
+        }
+    }
+    
+    addDetectionToLog(detection) {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'border-bottom pb-2 mb-2';
+
+        const time = new Date().toLocaleTimeString();
+        const plateText = detection.plate_text || 'Unknown';
+        const confidence = detection.confidence.toFixed(1);
+        const autoSaved = detection.auto_saved || false;
+
+        logEntry.innerHTML = `
+            <div class="d-flex justify-content-between">
+                <strong>${plateText}</strong>
+                <small class="text-muted">${time}</small>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="badge bg-${confidence > 70 ? 'success' : confidence > 40 ? 'warning' : 'danger'}">
+                    ${confidence}% confidence
+                </span>
+                ${autoSaved ? '<span class="badge bg-info ms-2"><i class="fas fa-save"></i> Auto-saved</span>' : ''}
+            </div>
+        `;
+
+        // Remove placeholder if it exists
+        const placeholder = this.detectionLog.querySelector('.text-center');
+        if (placeholder) {
+            placeholder.remove();
+        }
+
+        this.detectionLog.insertBefore(logEntry, this.detectionLog.firstChild);
+
+        // Keep only last 10 entries
+        while (this.detectionLog.children.length > 10) {
+            this.detectionLog.removeChild(this.detectionLog.lastChild);
+        }
+    }
+    
+    handleCaptureSaved(data) {
+        const captureItem = document.createElement('div');
+        captureItem.className = 'mb-2';
+        
+        captureItem.innerHTML = `
+            <img src="${data.image_url}" alt="Captured Plate" class="img-thumbnail mb-1" style="max-width: 100%;">
+            <div class="small">
+                <strong>${data.plate_text || 'Unknown'}</strong><br>
+                <span class="text-muted">${new Date().toLocaleString()}</span>
+            </div>
+        `;
+        
+        // Remove placeholder if it exists
+        const placeholder = this.recentCaptures.querySelector('.text-center');
+        if (placeholder) {
+            placeholder.remove();
+        }
+        
+        this.recentCaptures.insertBefore(captureItem, this.recentCaptures.firstChild);
+        
+        // Keep only last 5 captures
+        while (this.recentCaptures.children.length > 5) {
+            this.recentCaptures.removeChild(this.recentCaptures.lastChild);
+        }
+        
+        // Show success message
+        this.showSuccess('Frame captured and saved!');
+    }
+    
+    showError(message) {
+        // You can implement a toast notification here
+        console.error('Detection Error:', message);
+        alert('Error: ' + message);
+    }
+    
+    showSuccess(message) {
+        // You can implement a toast notification here
+        console.log('Success:', message);
+    }
+
+    showAutoSaveNotification(count) {
+        // Create a temporary notification
+        const notification = document.createElement('div');
+        notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
+        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 250px;';
+        notification.innerHTML = `
+            <i class="fas fa-save"></i> ${count} detection${count > 1 ? 's' : ''} auto-saved!
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+
+        document.body.appendChild(notification);
+
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 3000);
+    }
+
+    async loadRecentDetections() {
+        try {
+            const response = await fetch('/api/recent-detections');
+            const data = await response.json();
+
+            if (data.success && data.detections) {
+                this.updateRecentDetections(data.detections);
+            }
+        } catch (error) {
+            console.error('Error loading recent detections:', error);
+        }
+    }
+
+    updateRecentDetections(detections) {
+        // Find the recent detections container
+        const recentContainer = document.querySelector('#recent-detections .card-body');
+        if (!recentContainer) return;
+
+        // Clear existing content
+        recentContainer.innerHTML = '';
+
+        if (detections.length === 0) {
+            recentContainer.innerHTML = '<p class="text-center text-muted">No recent detections</p>';
+            return;
+        }
+
+        // Add each detection
+        detections.forEach(detection => {
+            const detectionItem = document.createElement('div');
+            detectionItem.className = 'mb-3 p-2 border rounded';
+
+            const detectedAt = new Date(detection.detected_at).toLocaleString();
+            const plateText = detection.plate_number || 'Unknown';
+            const confidence = detection.confidence ? detection.confidence.toFixed(1) : '0.0';
+
+            detectionItem.innerHTML = `
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <strong>${plateText}</strong>
+                        <br>
+                        <small class="text-muted">${detectedAt}</small>
+                        <br>
+                        <span class="badge bg-${confidence > 70 ? 'success' : confidence > 40 ? 'warning' : 'danger'}">
+                            ${confidence}% confidence
+                        </span>
+                    </div>
+                    ${detection.image_url ? `<img src="${detection.image_url}" alt="Plate" class="img-thumbnail" style="max-width: 80px; max-height: 60px;">` : ''}
+                </div>
+            `;
+
+            recentContainer.appendChild(detectionItem);
+        });
+    }
+}
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    new LiveDetection();
+});
+</script>
+{% endblock %}
